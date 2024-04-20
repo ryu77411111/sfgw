@@ -5,22 +5,25 @@ import json
 import traceback
 import requests
 import urllib.request
-from contextlib import closing
+from datetime import datetime
 
 class SFComWeb:
     def __init__(self, sfmonip, userid, passwd):
         #session id
         self.session = None
-        self.sessionid = None
         self.sfmonip = sfmonip
         self.userid = userid
         self.passwd = passwd
+
+    def gettoday(self):
+        now = datetime.now()
+        return f'{now:%Y/%m/%d}'.split('/')
 
     ##--GetWeb--###########
     def getpvweb(self, url):
         #print(url, file=sys.stderr)
         req = urllib.request.Request(url)
-        with closing(urllib.request.urlopen(req)) as res:
+        with urllib.request.urlopen(req) as res:
             result = res.read().decode()
             mobj = re.search(r'{.*}', result)
             if mobj is None:
@@ -53,70 +56,76 @@ class SFComWeb:
 
     ##--GetSession--###########
     def getSession(self):
-        if self.sessionid is not None:
-            return self.sessionid
-        url = 'https://www.frontier-monitor.com/permsite/D0000'
+        if self.session is not None:
+            return self.session
+
+        url = 'https://www.frontier-monitor.com/persite'
         params = {
             'actionId': 'LOGIN',
+            'screenId': 'C0000',
             'loginId': self.userid,
             'password': self.passwd,
+            'httpsurl': url,
         }
         try:
-            self.session = requests.session()
-            before_login = self.session.get(url)
-            #print('before_status:' + str(before_login.status_code))
-            jsessid = before_login.cookies.get('JSESSIONID')
-            #print(jsessid)
-            after_login = self.session.post(url + ';jsessionid=' + jsessid, data=params)
-            #print('login_status:' + str(after_login.status_code))
-            #print(after_login.text)
-            mobj = re.search(r'input value=.*name="pmsessionid"', after_login.text)
-            if mobj is None:
-                self.sessionid = None
-                print('login status:' + str(after_login.status_code))
-                print(re.sub(re.compile('<.*?>', re.MULTILINE | re.DOTALL), '', after_login.text))
-                print('login error:' + self.userid)
+            session = requests.session()
+            login = session.post(url + '/top', data=params)
+            #print('login_status:' + str(login.status_code))
+            if 'GlobalNavi' in login.text:
+                self.session = session
+                return self.session
             else:
-                self.sessionid = mobj.group().split('"')[1]
+                print("login error", file=sys.stderr)
         except Exception as e:
             print(list(traceback.TracebackException.from_exception(e).format()), file=sys.stderr)
-        return self.sessionid
+        return None
 
-    def getsfweb(self):
+    def getsfweb(self, day=None):
+        ymd = self.gettoday() if day is None else day.split('/')
+        url = 'https://www.frontier-monitor.com/persite/C0300'
+        params = {
+            'actionId': 'AJ_RELOAD',
+            'param1': '1',
+            'dateY': ymd[0],
+            'dateM': ymd[1],
+            'dateD': ymd[2],
+            'dateH': '0',
+            'eventflg': '0',
+        }
         # retry 3
         for num in range(3):
             try:
-                sid = self.getSession()
-                if sid is None:
+                if self.getSession() is None:
                     continue
-                url = 'https://www.frontier-monitor.com/permsite/D0100?pmsessionid=' + sid + '&selectItem=1'
-                #print(url, file=sys.stderr)
-                st = self.session.get(url)
-                return st.text
+                result = self.session.post(url, data=params)
+                #print(result.text, file=sys.stderr)
+                jobj = json.loads(result.text)
+                return jobj
             except Exception as e:
+                self.session = None
                 print(list(traceback.TracebackException.from_exception(e).format()), file=sys.stderr)
         print('retry out', flush=True)
         return None
 
-    def getpvkwh(self, result, idx):
-        if result is None:
+    def tostr(self, json):
+        if json is None:
             return None
-        if result in '[E004]':
-            return None
-        mobj = re.search(r'class="whList".*accesskey="1"', result)
-        if mobj is None:
-            print(result, flush=True)
-            return None
-        kwhs = mobj.group().split('/')
-        if len(kwhs) < idx:
-            return None
-        rmstr = 'kW<' if idx == 3 else 'kWh<'
-        return re.sub('^.*br>', '', kwhs[idx]).replace(rmstr, '').strip()
+        try:
+            return f"{json['hatsudenkwh']} {json['uttakwh']} {json['kattakwh']} {json['shohikwh']} {json['hatsudenkwmax']}"
+        except Exception as e:
+            return ''
 
-    def getpvval(self, res, idx):
-        kwh = self.getpvkwh(res, 0)
+    def getpvkwh(self, json):
+        if json is None:
+            return None
+        if 'hatsudenkwh' not in json:
+            return None
+        return json['hatsudenkwh']
+
+    def getpvval(self, json):
+        kwh = self.getpvkwh(json)
         if kwh is None:
-            self.sessionid = None
+            self.session = None
             return None
         return int(float(kwh) * 1000)
 

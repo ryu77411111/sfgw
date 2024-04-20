@@ -247,14 +247,15 @@ def response_edit0279(sf, addr, tid, seoj, deoj, opc, epclst):
             res += response_epc(epc, '44')
         elif epc == 'e0': # 発電瞬時値
             pvw = sf.getpvw()
+            #print(getnow() + ' 0279 EPC(' + epc + '):' + addr[0] + ',' + f'{pvw:08x}, {pvw}wh', flush=True)
             val = f'{pvw:04x}' if pvw else '0000'
             res += response_epc(epc, val)
         elif epc == 'e1': # 発電積算値
             result = 0
-            contents = sf.getsfweb()
-            if contents:
-                result = sf.getpvval(contents, 0)
-                print(getnow() + ' 0279 EPC(' + epc + '):' + addr[0] + ',' + f'{result:08x}, {result}wh', flush=True)
+            json = sf.getsfweb()
+            if json:
+                result = sf.getpvval(json)
+                print(getnow() + ' 0279 EPC(' + epc + '):' + addr[0] + ',' + f'{result:08x}, {result}wh ' + sf.tostr(json), flush=True)
             val = f'{result:08x}' if result else '00000000'
             res += response_epc(epc, val)
         elif epc == 'e5': # 発電電力制限設定１
@@ -319,7 +320,7 @@ def response_state_cmd(tid, seoj, deoj, opc, esv, epc, edt):
     return frame
 
 def getnow():
-    now = datetime.now(ZoneInfo('Asia/Tokyo'))
+    now = datetime.now()
     return f'{now:%Y%m%d%H%M}'
 
 def tohexymd(now):
@@ -344,7 +345,7 @@ if __name__ == '__main__':
     try:
         sf = SFComWeb.SFComWeb(SFCfg.SFMON_ADDR, SFCfg.USERID, SFCfg.PASSWD)
         print(sf.getpvw())
-        print(sf.getpvval(sf.getsfweb(), 0))
+        print(sf.tostr(sf.getsfweb()))
         receive_multi(sf)
     except Exception as e:
         msg = str(list(traceback.TracebackException.from_exception(e).format()))
